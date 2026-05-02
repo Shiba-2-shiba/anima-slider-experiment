@@ -13,6 +13,7 @@ from safetensors.torch import save_file
 
 
 RAW_MODEL_PREFIX = "model."
+RAW_ANIMA_NET_PREFIX = "net."
 MODEL_WEIGHT_PREFIX = "diffusion_model."
 
 
@@ -54,6 +55,8 @@ def normalize_weight_key(raw_key: str) -> str:
     key = raw_key
     if key.startswith(RAW_MODEL_PREFIX):
         key = key[len(RAW_MODEL_PREFIX):]
+    elif key.startswith(RAW_ANIMA_NET_PREFIX):
+        key = MODEL_WEIGHT_PREFIX + key[len(RAW_ANIMA_NET_PREFIX):]
     return key
 
 
@@ -117,11 +120,15 @@ def inspect_safetensors_targets_with_stats(
             lora_key = lora_key_for_weight(raw_key)
             raw_key_without_weight = raw_key[:-len(".weight")]
             comfy_key_without_weight = comfy_key[:-len(".weight")]
+            model_prefixed_comfy_key = f"{RAW_MODEL_PREFIX}{comfy_key}"
+            model_prefixed_comfy_key_without_weight = f"{RAW_MODEL_PREFIX}{comfy_key_without_weight}"
             match_values = [
                 raw_key,
                 raw_key_without_weight,
                 comfy_key,
                 comfy_key_without_weight,
+                model_prefixed_comfy_key,
+                model_prefixed_comfy_key_without_weight,
                 lora_key,
             ]
 

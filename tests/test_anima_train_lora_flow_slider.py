@@ -11,6 +11,23 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import anima_train_lora_flow_slider as flow_trainer
+from anima_slider import lora_network
+
+
+class Block(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.self_attn = torch.nn.Module()
+        self.self_attn.q_proj = torch.nn.Linear(3, 4, bias=False)
+        self.mlp = torch.nn.Module()
+        self.mlp.layer1 = torch.nn.Linear(3, 4, bias=False)
+
+
+class FakeDiffusion(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.diffusion_model = torch.nn.Module()
+        self.diffusion_model.blocks = torch.nn.ModuleList([Block()])
 
 
 class AnimaTrainLoraFlowSliderTests(unittest.TestCase):
@@ -145,6 +162,30 @@ class AnimaTrainLoraFlowSliderTests(unittest.TestCase):
         self.assertEqual(summary["mean_loss"], 3.0)
         self.assertEqual(summary["raw_losses"], [1.0, 3.0])
         self.assertEqual(summary["mean_raw_loss"], 2.0)
+
+    def test_build_lora_optimizer_param_groups_applies_regex_lrs_without_duplicates(self):
+        model = FakeDiffusion()
+        lora_network.inject_lora_linear_modules(
+            model,
+            include_patterns=[
+                "model.diffusion_model.blocks.*.self_attn.*_proj",
+                "model.diffusion_model.blocks.*.mlp.layer*",
+            ],
+            exclude_patterns=[],
+            rank=2,
+            alpha=2.0,
+        )
+
+        groups, summary = flow_trainer.build_lora_optimizer_param_groups(
+            model,
+            fallback_lr=0.0001,
+            reg_lrs={r".*self_attn.*": 0.00001},
+        )
+
+        self.assertEqual([group["lr"] for group in groups], [0.00001, 0.0001])
+        self.assertEqual([item["module_count"] for item in summary], [1, 1])
+        params = [param for group in groups for param in group["params"]]
+        self.assertEqual(len(params), len({id(param) for param in params}))
 
 
 if __name__ == "__main__":

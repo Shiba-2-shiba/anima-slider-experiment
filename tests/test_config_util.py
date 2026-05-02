@@ -92,6 +92,39 @@ class AnimaSliderConfigUtilTests(unittest.TestCase):
         )
         self.assertEqual(config.model.comfyui_path, str(root / "ComfyUI"))
 
+    def test_network_reg_dims_and_lrs_can_be_loaded_from_yaml(self):
+        root = REPO_ROOT / "tmp-config-fixture-reg-rules"
+        config_dir = root / "configs"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config_dir / "config.yaml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "model:",
+                    '  diffusion_model_path: "model.safetensors"',
+                    '  text_encoder_path: "qwen.safetensors"',
+                    '  vae_path: "vae.safetensors"',
+                    '  comfyui_path: "ComfyUI"',
+                    "network:",
+                    '  preset: "attn_only"',
+                    "  reg_dims:",
+                    '    ".*self_attn.*": 16',
+                    '    ".*cross_attn.*": 8',
+                    "  reg_lrs:",
+                    '    ".*self_attn.*": 0.00001',
+                    '    ".*cross_attn.*": 0.000005',
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        config = config_util.load_config_from_yaml(str(config_path))
+
+        self.assertEqual(config.network.reg_dims[r".*self_attn.*"], 16)
+        self.assertEqual(config.network.reg_dims[r".*cross_attn.*"], 8)
+        self.assertEqual(config.network.reg_lrs[r".*self_attn.*"], 0.00001)
+        self.assertEqual(config.network.reg_lrs[r".*cross_attn.*"], 0.000005)
+
 
 if __name__ == "__main__":
     unittest.main()

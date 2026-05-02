@@ -9,6 +9,7 @@ import torch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from anima_slider import config_util
 from anima_slider import lora_util
 from anima_slider import lora_network
 
@@ -88,6 +89,30 @@ class AnimaSliderLoraUtilTests(unittest.TestCase):
         self.assertEqual(report["counts"]["estimated_lora_parameters"], 14)
         self.assertEqual(report["by_module"], {"self_attn": 1})
         self.assertEqual(report["targets"][0]["shape"], [4, 3])
+
+    def test_net_prefixed_anima_checkpoint_keys_normalize_to_diffusion_model_targets(self):
+        tensors = {
+            "net.blocks.0.self_attn.q_proj.weight": torch.zeros((4, 3)),
+            "net.blocks.0.cross_attn.output_proj.weight": torch.zeros((5, 4)),
+            "net.blocks.0.mlp.layer1.weight": torch.zeros((6, 5)),
+            "net.final_layer.linear.weight": torch.zeros((7, 6)),
+        }
+        preset = config_util.NETWORK_PRESETS["attn_mlp"]
+        with patch.object(lora_util, "safe_open", return_value=FakeSafeOpen(tensors)):
+            targets = lora_util.inspect_safetensors_targets(
+                "unused.safetensors",
+                include_patterns=preset["include_patterns"],
+                exclude_patterns=preset["exclude_patterns"],
+            )
+
+        self.assertEqual(
+            sorted(target.lora_key for target in targets),
+            [
+                "diffusion_model.blocks.0.cross_attn.output_proj",
+                "diffusion_model.blocks.0.mlp.layer1",
+                "diffusion_model.blocks.0.self_attn.q_proj",
+            ],
+        )
 
 
 class Block(torch.nn.Module):
@@ -193,6 +218,30 @@ class AnimaSliderLoraNetworkTests(unittest.TestCase):
             self.assertEqual(wrapped.multiplier, 2.0)
 
         self.assertEqual(wrapped.multiplier, 1.0)
+
+    def test_inject_lora_linear_modules_applies_regex_rank_overrides(self):
+        model = FakeDiffusion()
+        injected = lora_network.inject_lora_linear_modules(
+            model,
+            include_patterns=[
+                "model.diffusion_model.blocks.*.self_attn.*_proj",
+                "model.diffusion_model.blocks.*.mlp.layer*",
+            ],
+            exclude_patterns=[],
+            rank=2,
+            alpha=2.0,
+            reg_dims={r".*self_attn.*": 3, r".*mlp.*": 1},
+        )
+
+        self.assertEqual(
+            [(item.lora_key, item.rank) for item in injected],
+            [
+                ("diffusion_model.blocks.0.self_attn.q_proj", 3),
+                ("diffusion_model.blocks.0.mlp.layer1", 1),
+            ],
+        )
+        self.assertEqual(model.diffusion_model.blocks[0].self_attn.q_proj.rank, 3)
+        self.assertEqual(model.diffusion_model.blocks[0].mlp.layer1.rank, 1)
 
 
 if __name__ == "__main__":

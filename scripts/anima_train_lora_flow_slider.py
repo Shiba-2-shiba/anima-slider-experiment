@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import sys
+from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,8 @@ def collect_cli_overrides(args, config: config_util.RootConfig) -> dict[str, obj
         "text_encoder": args.text_encoder,
         "vae": args.vae,
         "comfyui": args.comfyui,
+        "network_reg_dims": args.network_reg_dims,
+        "network_reg_lrs": args.network_reg_lrs,
     }
 
 
@@ -138,6 +141,60 @@ def compute_loss_weight_for_sigma(sigma: torch.Tensor, weighting_scheme: str) ->
 
 def forward_role(patcher, latent, sigma, cond):
     return anima_forward.apply_model_with_condition(patcher, latent, sigma, cond)
+
+
+def build_lora_optimizer_param_groups(
+    model: torch.nn.Module,
+    fallback_lr: float,
+    reg_lrs: dict[str, float] | None,
+) -> tuple[list[dict], list[dict]]:
+    groups_by_key: dict[tuple[str, float], dict] = {}
+    summaries_by_key: dict[tuple[str, float], dict] = {}
+    seen_params: set[int] = set()
+
+    for name, module in model.named_modules():
+        if not isinstance(module, lora_network.LoRALinear):
+            continue
+
+        match = lora_network.regex_rule_for_module(name, reg_lrs)
+        rule = match[0] if match is not None else "<fallback>"
+        lr = float(match[1] if match is not None else fallback_lr)
+        key = (rule, lr)
+        params = list(module.lora_down.parameters()) + list(module.lora_up.parameters())
+
+        group = groups_by_key.setdefault(key, {"params": [], "lr": lr})
+        summary = summaries_by_key.setdefault(
+            key,
+            {
+                "rule": rule,
+                "lr": lr,
+                "module_count": 0,
+                "parameter_count": 0,
+                "modules": [],
+            },
+        )
+        summary["module_count"] += 1
+        summary["parameter_count"] += sum(parameter.numel() for parameter in params)
+        summary["modules"].append(lora_network.lora_key_for_module(name))
+
+        for parameter in params:
+            parameter_id = id(parameter)
+            if parameter_id in seen_params:
+                raise RuntimeError(f"Duplicate LoRA optimizer parameter detected for module: {name}")
+            seen_params.add(parameter_id)
+            group["params"].append(parameter)
+
+    groups = list(groups_by_key.values())
+    summaries = list(summaries_by_key.values())
+    return groups, summaries
+
+
+def summarize_injected_lora_ranks(injected) -> list[dict[str, int]]:
+    counts = Counter(item.rank for item in injected)
+    return [
+        {"rank": rank, "module_count": counts[rank]}
+        for rank in sorted(counts)
+    ]
 
 
 @torch.no_grad()
@@ -408,12 +465,19 @@ def train(args):
         config.network.exclude_patterns,
         rank=args.rank or config.network.rank,
         alpha=args.alpha or config.network.alpha,
+        reg_dims=config.network.reg_dims,
     )
     params = lora_network.lora_parameters(patcher.model)
     if not params:
         raise RuntimeError("No LoRA parameters were injected")
 
-    optimizer = torch.optim.AdamW(params, lr=args.lr or config.train.lr)
+    lr = args.lr or config.train.lr
+    optimizer_param_groups, optimizer_group_summary = build_lora_optimizer_param_groups(
+        patcher.model,
+        fallback_lr=lr,
+        reg_lrs=config.network.reg_lrs,
+    )
+    optimizer = torch.optim.AdamW(optimizer_param_groups, lr=lr)
     width = args.width or train_records[0].width
     height = args.height or train_records[0].height
     validate_anima_resolution(width, height)
@@ -539,6 +603,8 @@ def train(args):
         "rank": args.rank or config.network.rank,
         "alpha": args.alpha or config.network.alpha,
         "injected_targets": len(injected),
+        "injected_target_ranks": summarize_injected_lora_ranks(injected),
+        "optimizer_param_groups": optimizer_group_summary,
         "num_inference_steps": args.num_inference_steps,
         "scheduler_name": args.scheduler_name,
         "timestep_sampling": args.timestep_sampling,
@@ -591,6 +657,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--rank", type=int, default=None)
     parser.add_argument("--alpha", type=float, default=None)
+    parser.add_argument("--network_reg_dims", default=None, help="YAML mapping of regex fullmatch patterns to LoRA ranks.")
+    parser.add_argument("--network_reg_lrs", default=None, help="YAML mapping of regex fullmatch patterns to optimizer LRs.")
     parser.add_argument("--seed", type=int, default=961218314523996)
     parser.add_argument("--eval_seed", type=int, default=961218314523996)
     parser.add_argument("--vary_seed", action="store_true")

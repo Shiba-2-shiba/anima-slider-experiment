@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import fnmatch
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Mapping, TypeVar
 
 import torch
+
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -51,11 +56,14 @@ def _candidate_names(module_name: str) -> list[str]:
     clean_name = module_name.removesuffix(".weight")
     names = [clean_name]
     if clean_name.startswith("model."):
-        names.append(clean_name[len("model."):])
+        clean_name_without_model = clean_name[len("model."):]
+        names.append(clean_name_without_model)
     else:
         names.append(f"model.{clean_name}")
     if clean_name.startswith("diffusion_model."):
         names.append(clean_name[len("diffusion_model."):])
+    elif clean_name.startswith("model.diffusion_model."):
+        names.append(clean_name[len("model.diffusion_model."):])
     return list(dict.fromkeys(names))
 
 
@@ -80,6 +88,30 @@ def lora_key_for_module(module_name: str) -> str:
     if clean_name.startswith("model."):
         clean_name = clean_name[len("model."):]
     return clean_name
+
+
+def regex_rule_for_module(
+    module_name: str,
+    rules: Mapping[str, T] | None,
+) -> tuple[str, T] | None:
+    if not rules:
+        return None
+    candidates = _candidate_names(module_name)
+    for pattern, value in rules.items():
+        if any(re.fullmatch(pattern, candidate) for candidate in candidates):
+            return pattern, value
+    return None
+
+
+def regex_value_for_module(
+    module_name: str,
+    rules: Mapping[str, T] | None,
+    default: T,
+) -> T:
+    match = regex_rule_for_module(module_name, rules)
+    if match is not None:
+        return match[1]
+    return default
 
 
 def _get_parent_module(root: torch.nn.Module, module_name: str) -> tuple[torch.nn.Module, str]:
@@ -108,14 +140,16 @@ def inject_lora_linear_modules(
     exclude_patterns: list[str],
     rank: int,
     alpha: float,
+    reg_dims: Mapping[str, int] | None = None,
 ) -> list[InjectedLora]:
     injected = []
     for name in find_lora_linear_targets(model, include_patterns, exclude_patterns):
         parent, attribute = _get_parent_module(model, name)
         base = getattr(parent, attribute)
-        wrapped = LoRALinear(base, rank=rank, alpha=alpha)
+        module_rank = regex_value_for_module(name, reg_dims, rank)
+        wrapped = LoRALinear(base, rank=module_rank, alpha=alpha)
         setattr(parent, attribute, wrapped)
-        injected.append(InjectedLora(module_name=name, lora_key=lora_key_for_module(name), rank=rank, alpha=alpha))
+        injected.append(InjectedLora(module_name=name, lora_key=lora_key_for_module(name), rank=module_rank, alpha=alpha))
     return injected
 
 

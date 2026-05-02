@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 PRECISION_TYPES = {"fp32", "float32", "fp16", "float16", "bf16", "bfloat16"}
@@ -51,6 +51,8 @@ OVERRIDE_ALIASES = {
     "comfyui": "model.comfyui_path",
     "rank": "network.rank",
     "alpha": "network.alpha",
+    "network_reg_dims": "network.reg_dims",
+    "network_reg_lrs": "network.reg_lrs",
     "iterations": "train.iterations",
     "lr": "train.lr",
     "precision": "train.precision",
@@ -75,6 +77,8 @@ class NetworkConfig(BaseModel):
     preset: str | None = None
     include_patterns: list[str] = []
     exclude_patterns: list[str] = []
+    reg_dims: dict[str, int] = Field(default_factory=dict)
+    reg_lrs: dict[str, float] = Field(default_factory=dict)
 
 
 class TrainConfig(BaseModel):

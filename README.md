@@ -170,6 +170,37 @@ python scripts\anima_train_lora_flow_slider.py `
 
 `--diffusion_model` も `--model` の alias として使えます。
 
+### module別 rank / learning rate
+
+`network.reg_dims` と `network.reg_lrs` で LoRA module ごとの rank と learning rate を正規表現で上書きできます。pattern は `diffusion_model.blocks.0.self_attn.q_proj` のような module 名に対して `re.fullmatch` で評価されます。どの rule にも一致しない module は通常の `network.rank` と `train.lr` を使います。
+
+```yaml
+network:
+  rank: 16
+  alpha: 16
+  preset: "attn_mlp"
+  reg_dims:
+    ".*self_attn.*": 16
+    ".*cross_attn.*": 8
+    ".*mlp.*": 4
+  reg_lrs:
+    ".*self_attn.*": 0.000005
+    ".*cross_attn.*": 0.000003
+    ".*mlp.*": 0.000002
+```
+
+CLI から一時的に指定する場合は YAML mapping として渡せます。
+
+```powershell
+python scripts\anima_train_lora_flow_slider.py `
+  --config_file configs\config-anima-slider-attn-mlp.yaml `
+  --network_reg_dims "{'.*self_attn.*': 16, '.*cross_attn.*': 8, '.*mlp.*': 4}" `
+  --network_reg_lrs "{'.*self_attn.*': 0.000005, '.*cross_attn.*': 0.000003, '.*mlp.*': 0.000002}" `
+  --cache cache\anima-age-conditioning-v2.pt `
+  --output_lora models\age_slider_reg_rules\anima_age_slider.safetensors `
+  --output_report reports\age-slider-reg-rules.json
+```
+
 ## ComfyUI で確認
 
 学習した LoRA を local ComfyUI の LoRA フォルダに置きます。
