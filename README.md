@@ -126,7 +126,8 @@ python scripts\cache_anima_conditioning.py `
 
 ## LoRA 学習
 
-現在の推奨 recipe は `run04` 相当です。
+Prompt indicesでプロンプトセット数を設定します。以下だと24個のプロンプトで作成する感じです。
+3-4個程度でもある程度効果があるので、まずはそこから行うのが良いと思います。
 
 ```powershell
 python scripts\anima_train_lora_flow_slider.py `
