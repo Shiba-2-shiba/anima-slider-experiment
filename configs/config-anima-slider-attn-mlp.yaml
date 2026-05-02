@@ -1,0 +1,26 @@
+model:
+  diffusion_model_path: "{repo_root}/学習用モデル/Diffusion_model/copycatAnima_20260425.safetensors"
+  text_encoder_path: "{repo_root}/学習用モデル/Textencorder/qwen_3_06b_base.safetensors"
+  vae_path: "{repo_root}/学習用モデル/VAE/qwen_image_vae.safetensors"
+  comfyui_path: "{repo_root}/ComfyUI"
+network:
+  rank: 16
+  alpha: 16
+  target: "diffusion_model_only"
+  preset: "attn_mlp"
+train:
+  precision: "bfloat16"
+  iterations: 500
+  lr: 0.00002
+  optimizer: "AdamW"
+  sampler: "er_sde"
+  scheduler: "normal"
+  steps: 30
+  cfg: 4.5
+save:
+  name: "anima_slider_attn_mlp"
+  path: "./models"
+  per_steps: 100
+  precision: "bfloat16"
+logging:
+  verbose: false

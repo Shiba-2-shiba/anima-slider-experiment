@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anima-slider"
+version = "0.1.0"
+description = "Standalone Anima/Cosmos DiT slider LoRA trainer experiments."
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic",
+    "pyyaml",
+    "safetensors",
+    "torch",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
